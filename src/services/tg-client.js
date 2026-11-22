@@ -20,6 +20,30 @@ export async function getClient(settings) {
   return client;
 }
 
+let reconnecting = null;
+// Reconnects after Telegram dropped the connection (one attempt shared by everyone waiting).
+export async function ensureConnected(c = client) {
+  if (!c || c.connected) return;
+  if (!reconnecting) {
+    reconnecting = (async () => {
+      for (let i = 0; i < 10; i++) {
+        try {
+          await c.connect();
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, Math.min(30000, 2000 * (i + 1))));
+        }
+      }
+      throw new Error('לא הצלחתי להתחבר מחדש לטלגרם. בדוק את האינטרנט.');
+    })().finally(() => (reconnecting = null));
+  }
+  return reconnecting;
+}
+
+export function isDisconnectError(e) {
+  return /disconnected|not connected|connection closed|websocket|socket closed|TIMEOUT/i.test(`${e?.message || ''} ${e?.errorMessage || ''}`);
+}
+
 export function currentClient() {
   return client;
 }

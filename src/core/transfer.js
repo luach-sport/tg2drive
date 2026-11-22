@@ -2,6 +2,7 @@ import { concatBytes, sleep } from './bytes.js';
 import * as tgMedia from '../services/tg-media.js';
 import * as driveUpload from '../services/drive-upload.js';
 import * as driveApi from '../services/drive-api.js';
+import { getItem, setItem, removeItem } from './storage.js';
 
 const REAL_DEPS = { ...tgMedia, ...driveUpload, ...driveApi };
 
@@ -151,16 +152,39 @@ export class Transfer {
       return this._sendSafe(url, bytes, 0, bytes.length);
     }
 
-    // Big files: stream from Telegram to Drive in 8 MB pieces.
+    // Big files: stream from Telegram to Drive in pieces.
+    // The Drive upload address is remembered, so a file that stopped in the middle
+    // (error, refresh, closed tab) continues from where Drive got to, not from the start.
     const total = item.size;
-    const url = await this.d.startUpload({ ...meta, size: total });
+    const key = `upload.${this.folder.id}.${this.channel.id}.${item.id}`;
+    let url = getItem(key, null);
     let offset = 0;
+    if (url) {
+      try {
+        const st = await this.d.uploadStatus(url, total);
+        if (st.done) {
+          removeItem(key);
+          return st.file;
+        }
+        offset = st.received || 0;
+        if (offset) this._addLog(item, 'retry', `ממשיך מ-${Math.round((offset / total) * 100)}% (לא מתחיל מההתחלה)`);
+      } catch (e) {
+        if (e.authNeeded) throw e;
+        url = null; // the old upload expired — start this file fresh
+        offset = 0;
+      }
+    }
+    if (!url) {
+      url = await this.d.startUpload({ ...meta, size: total });
+      setItem(key, url);
+    }
+    this.current.sent = offset;
     let pending = [];
     let pendingLen = 0;
     let result = null;
 
     const onDownloaded = (n) => this._downloaded(n);
-    for await (const part of this.d.streamDocument(this.channel.entity, item, { onDownloaded })) {
+    for await (const part of this.d.streamDocument(this.channel.entity, item, { onDownloaded, startOffset: offset })) {
       await this._checkPause();
       if (this.state === 'stopped') throw new Error('stopped');
       pending.push(part);
@@ -180,6 +204,7 @@ export class Transfer {
       offset += pendingLen;
     }
     if (!result?.done) throw new Error('הקובץ לא הושלם בדרייב');
+    removeItem(key);
     return result.file;
   }
 
@@ -196,7 +221,10 @@ export class Transfer {
         if (e.authNeeded) {
           await this._waitForAuth();
           i--;
-        } else if (e.restart || i === MAX_TRIES - 1) {
+        } else if (e.restart) {
+          removeItem(`upload.${this.folder.id}.${this.channel.id}.${this.current?.item?.id}`);
+          throw e;
+        } else if (i === MAX_TRIES - 1) {
           throw e;
         } else {
           await sleep(2000 * (i + 1));

@@ -1,6 +1,6 @@
 import { Api, utils, errors } from 'telegram';
 import bigInt from 'big-integer';
-import { currentClient } from './tg-client.js';
+import { currentClient, ensureConnected, isDisconnectError } from './tg-client.js';
 
 const PART = 1024 * 1024; // Telegram's biggest allowed piece (1 MB)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -13,14 +13,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * parallel: how many 1 MB requests run at the same time
  * ahead:    how many MB may wait in memory ahead of the consumer
  */
-export async function* fastDownload(entity, item, { parallel = 6, ahead = 24, onDownloaded, client = currentClient() } = {}) {
+export async function* fastDownload(entity, item, { parallel = 6, ahead = 24, onDownloaded, startOffset = 0, client = currentClient() } = {}) {
+  await ensureConnected(client);
   let info = utils.getFileInfo(item.msg.media);
   let sender = await client.getSender(info.dcId);
   const totalParts = Math.ceil(item.size / PART);
 
   const ready = new Map(); // part index -> bytes
-  let nextToFetch = 0;
-  let nextToYield = 0;
+  // resuming: start from the 1 MB piece that holds startOffset, and drop the bytes before it
+  const firstPart = Math.floor(startOffset / PART);
+  let skipBytes = startOffset - firstPart * PART;
+  let nextToFetch = firstPart;
+  let nextToYield = firstPart;
   let failure = null;
   let waitingConsumer = null;
   let waitingWorkers = [];
@@ -51,6 +55,7 @@ export async function* fastDownload(entity, item, { parallel = 6, ahead = 24, on
   };
 
   const fetchPart = async (index) => {
+    let drops = 0;
     for (let attempt = 0; ; attempt++) {
       try {
         const res = await client.invokeWithSender(
@@ -61,7 +66,13 @@ export async function* fastDownload(entity, item, { parallel = 6, ahead = 24, on
         return res.bytes;
       } catch (e) {
         const msg = e.errorMessage || '';
-        if (e instanceof errors.FileMigrateError) {
+        if (isDisconnectError(e) && drops++ < 20) {
+          // Telegram dropped the connection: reconnect and ask for the same piece again
+          attempt--;
+          await sleep(1000);
+          await ensureConnected(client);
+          sender = await client.getSender(info.dcId);
+        } else if (e instanceof errors.FileMigrateError) {
           sender = await client.getSender(e.newDc);
         } else if (msg.includes('FILE_REFERENCE')) {
           await refreshReference();
@@ -105,8 +116,12 @@ export async function* fastDownload(entity, item, { parallel = 6, ahead = 24, on
         await new Promise((r) => (waitingConsumer = r));
       }
       if (failure) throw failure;
-      const bytes = ready.get(nextToYield);
+      let bytes = ready.get(nextToYield);
       ready.delete(nextToYield);
+      if (skipBytes) {
+        bytes = bytes.subarray(skipBytes);
+        skipBytes = 0;
+      }
       nextToYield++;
       wakeWorkers();
       yield bytes;
