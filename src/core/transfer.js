@@ -142,7 +142,8 @@ export class Transfer {
     let pendingLen = 0;
     let result = null;
 
-    for await (const part of this.d.streamDocument(this.channel.entity, item)) {
+    const onDownloaded = (n) => this._downloaded(n);
+    for await (const part of this.d.streamDocument(this.channel.entity, item, { onDownloaded })) {
       await this._checkPause();
       if (this.state === 'stopped') throw new Error('stopped');
       pending.push(part);
@@ -212,6 +213,24 @@ export class Transfer {
 
   speed() {
     return this._speed.value;
+  }
+
+  // download side (Telegram → browser), tracked separately to show which side is slower
+  _downloaded(n) {
+    if (this.current) this.current.downloaded = (this.current.downloaded || 0) + n;
+    const d = (this._dl ||= { t: Date.now(), bytes: 0, value: 0 });
+    d.bytes += n;
+    const now = Date.now();
+    if (now - d.t >= 1000) {
+      const inst = (d.bytes * 1000) / (now - d.t);
+      d.value = d.value ? d.value * 0.7 + inst * 0.3 : inst;
+      d.t = now;
+      d.bytes = 0;
+    }
+  }
+
+  downloadSpeed() {
+    return this._dl?.value || 0;
   }
 
   // --- controls ---

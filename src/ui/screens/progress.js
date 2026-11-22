@@ -26,7 +26,8 @@ export function progressScreen(ctx, { onFinish }) {
   const curName = h('div', { class: 'cur-name' });
   const curBar = progressBar(0);
   const curText = h('div', { class: 'muted small' });
-  const curBox = h('div', { class: 'card stack' }, h('h3', {}, 'הקובץ הנוכחי'), curName, curBar, curText);
+  const speedText = h('div', { class: 'muted small' });
+  const curBox = h('div', { class: 'card stack' }, h('h3', {}, 'הקובץ הנוכחי'), curName, curBar, curText, speedText);
 
   const authBox = h('div', { class: 'card stack warn', hidden: true },
     h('p', {}, 'גוגל מנתק את החיבור כל שעה בערך. לחץ כדי להמשיך מאותה נקודה:'),
@@ -67,7 +68,9 @@ export function progressScreen(ctx, { onFinish }) {
       const it = t.current.item;
       curName.replaceChildren(`${KINDS[it.kind]?.icon || ''} `, fileName(it.name));
       setBar(curBar, percent(t.current.sent, t.current.size));
+      const dl = t.downloadSpeed();
       curText.textContent = `${formatBytes(t.current.sent)} מתוך ${formatBytes(t.current.size)} · ${percent(t.current.sent, t.current.size).toFixed(0)}%${t.current.attempt > 1 ? ` · ניסיון ${t.current.attempt}` : ''}`;
+      speedText.textContent = `⬇ הורדה מטלגרם: ${dl ? `${formatBytes(dl)} לשנייה` : '—'}   ·   ⬆ העלאה לדרייב: ${speed ? `${formatBytes(speed)} לשנייה` : '—'}`;
     } else {
       curBox.hidden = true;
     }

@@ -1,5 +1,4 @@
 import { Api } from 'telegram';
-import bigInt from 'big-integer';
 import { currentClient } from './tg-client.js';
 import { nameFromCaption } from '../core/format.js';
 
@@ -105,15 +104,8 @@ export async function fetchNewer(entity, afterId) {
     .map((m) => ({ id: m.id, item: messageToItem(m) }));
 }
 
-// Streams a document in 512 KB pieces without holding the whole file in memory.
-export function streamDocument(entity, item) {
-  return currentClient().iterDownload({
-    file: item.msg.media,
-    requestSize: 512 * 1024,
-    fileSize: bigInt(item.size),
-    msgData: [entity, item.id], // lets the library refresh expired file references
-  });
-}
+// Streams a document with several parallel requests, without holding the whole file in memory.
+export { fastDownload as streamDocument } from './tg-fast-download.js';
 
 export async function downloadSmall(item) {
   const buf = await currentClient().downloadMedia(item.msg, {});

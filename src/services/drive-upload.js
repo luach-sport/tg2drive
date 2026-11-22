@@ -2,8 +2,8 @@ import { getToken, dropToken, AuthNeededError } from './google-auth.js';
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink';
 
-// Upload pieces must be multiples of 256 KB (except the last one). 8 MB is a good balance.
-export const CHUNK = 32 * 256 * 1024;
+// Upload pieces must be multiples of 256 KB (except the last one). 16 MB keeps request overhead low.
+export const CHUNK = 64 * 256 * 1024;
 
 // Opens a resumable upload session and returns its URL.
 export async function startUpload({ name, mime, size, folderId, description, appProperties }) {
