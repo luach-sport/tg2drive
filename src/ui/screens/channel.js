@@ -1,6 +1,6 @@
 import { h, progressBar, setBar } from '../dom.js';
 import { resolveChannel } from '../../services/tg-channel.js';
-import { scanChannel } from '../../services/tg-media.js';
+import { scanChannel, loadPost } from '../../services/tg-media.js';
 import { getItem, setItem } from '../../core/storage.js';
 import { percent } from '../../core/format.js';
 
@@ -24,6 +24,12 @@ export function channelScreen(ctx, { me, onLogout, onScanned }) {
     try {
       const channel = await resolveChannel(link);
       setItem('lastLink', link);
+      if (channel.postId) {
+        status.replaceChildren(h('p', {}, 'טוען את הפוסט...'));
+        ctx.channel = channel;
+        ctx.scan = await loadPost(channel.entity, channel.postId);
+        return onScanned();
+      }
       const bar = progressBar(0);
       const line = h('p', { class: 'muted' }, 'סורק את הפוסטים...');
       status.replaceChildren(h('p', {}, h('b', {}, channel.title)), bar, line);
@@ -47,8 +53,8 @@ export function channelScreen(ctx, { me, onLogout, onScanned }) {
     h(
       'form',
       { class: 'card stack', onsubmit: (e) => (e.preventDefault(), run()) },
-      h('h2', {}, 'איזה ערוץ להעתיק?'),
-      h('p', { class: 'muted' }, 'הדבק קישור לערוץ או לקבוצה שאתה חבר בהם.'),
+      h('h2', {}, 'מה להעתיק?'),
+      h('p', { class: 'muted' }, 'הדבק קישור לערוץ שלם, או קישור לפוסט מסוים (בטלגרם: קליק ימני על הפוסט ← העתק קישור).'),
       input,
       btn,
       status

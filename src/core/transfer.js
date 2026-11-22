@@ -13,7 +13,8 @@ const POLL_MS = 60 * 1000;
  * Emits snapshots through onUpdate so the UI can draw progress bars.
  */
 export class Transfer {
-  constructor({ channel, folder, kinds, mode, items, lastId, onUpdate, deps = REAL_DEPS, pollMs = POLL_MS }) {
+  constructor({ channel, folder, kinds, mode, items, lastId, onUpdate, selectedIds = null, deps = REAL_DEPS, pollMs = POLL_MS }) {
+    this.selectedIds = selectedIds; // archive files the user ticked (null = all of the chosen kinds)
     this.d = deps;
     this.pollMs = pollMs;
     this.channel = channel; // { entity, id, title }
@@ -28,6 +29,8 @@ export class Transfer {
     this.stats = { totalFiles: 0, doneFiles: 0, skipped: 0, failed: 0, totalBytes: 0, doneBytes: 0 };
     this.current = null; // { item, sent, size }
     this.failedItems = [];
+    this.files = []; // every file this run deals with, in order
+    this.status = new Map(); // id -> 'waiting' | 'active' | 'done' | 'exists' | 'failed'
     this._initialItems = items || [];
     this._gate = null;
     this._authWaiter = null;
@@ -38,18 +41,24 @@ export class Transfer {
     this._set('preparing');
     const copied = await this.d.listCopiedIds(this.folder.id, this.channel.id);
     this.copied = copied;
-    if (this.mode !== 'new') this._enqueue(this._initialItems);
+    if (this.mode !== 'new') {
+      const picked = this.selectedIds ? this._initialItems.filter((i) => this.selectedIds.has(i.id)) : this._initialItems;
+      this._enqueue(picked, { anyKind: Boolean(this.selectedIds) });
+    }
     this._initialItems = null;
     this._loop();
   }
 
-  _enqueue(items) {
+  _enqueue(items, { anyKind = false } = {}) {
     for (const item of items) {
-      if (!item || !this.kinds.has(item.kind)) continue;
+      if (!item || (!anyKind && !this.kinds.has(item.kind))) continue;
+      if (!this.status.has(item.id)) this.files.push(item);
       if (this.copied.has(item.id)) {
         this.stats.skipped++;
+        this.status.set(item.id, 'exists');
         continue;
       }
+      this.status.set(item.id, 'waiting');
       this.queue.push(item);
       this.stats.totalFiles++;
       this.stats.totalBytes += item.size || 0;
@@ -88,16 +97,22 @@ export class Transfer {
     for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
       try {
         this.current = { item, sent: 0, size: item.size, attempt };
+        this.status.set(item.id, 'active');
         this._emit();
         const file = await this._copyOne(item);
         this.copied.add(item.id);
+        this.status.set(item.id, 'done');
+        item.driveFile = file;
         this.stats.doneFiles++;
         this.stats.doneBytes += item.size || 0;
         this._addLog(item, 'ok', '', file);
         this.current = null;
         return;
       } catch (e) {
-        if (this.state === 'stopped') return;
+        if (this.state === 'stopped') {
+          this.status.set(item.id, 'waiting');
+          return;
+        }
         if (e.authNeeded) {
           attempt--; // waiting for the user is not a failed attempt
           await this._waitForAuth();
@@ -105,6 +120,8 @@ export class Transfer {
         }
         if (attempt === MAX_TRIES) {
           this.stats.failed++;
+          this.status.set(item.id, 'failed');
+          item.error = e.message || String(e);
           this.failedItems.push(item);
           this._addLog(item, 'error', e.message || String(e));
           this.current = null;
@@ -260,7 +277,7 @@ export class Transfer {
     this.stats.totalFiles -= items.length;
     this.stats.totalBytes -= items.reduce((s, i) => s + (i.size || 0), 0);
     const restart = this.state === 'done';
-    this._enqueue(items);
+    this._enqueue(items, { anyKind: true });
     if (restart) this._loop();
   }
 

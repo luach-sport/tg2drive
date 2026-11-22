@@ -3,17 +3,22 @@ import bigInt from 'big-integer';
 import { currentClient } from './tg-client.js';
 
 // Understands: https://t.me/name, t.me/s/name, @name, name, t.me/+hash, t.me/joinchat/hash, t.me/c/123/45
+// A link to one post (t.me/name/123, t.me/c/123/45) also returns postId.
 export function parseChannelLink(input) {
-  const s = String(input || '').trim();
+  const s = String(input || '').trim().replace(/[?#].*$/, '');
   let m = s.match(/t\.me\/(?:\+|joinchat\/)([\w-]+)/i);
   if (m) return { invite: m[1] };
-  m = s.match(/t\.me\/c\/(\d+)/i);
-  if (m) return { channelId: m[1] };
-  m = s.match(/(?:t\.me\/(?:s\/)?|^@)([A-Za-z][\w]{3,})/i);
-  if (m) return { username: m[1] };
+  m = s.match(/t\.me\/c\/(\d+)(?:\/(\d+))?(?:\/(\d+))?/i);
+  if (m) return { channelId: m[1], postId: num(m[3] || m[2]) };
+  m = s.match(/(?:t\.me\/(?:s\/)?|^@)([A-Za-z][\w]{3,})(?:\/(\d+))?(?:\/(\d+))?/i);
+  if (m) return { username: m[1], postId: num(m[3] || m[2]) };
   m = s.match(/^([A-Za-z][\w]{3,})$/);
   if (m) return { username: m[1] };
   return null;
+}
+
+function num(v) {
+  return v ? Number(v) : null;
 }
 
 export async function resolveChannel(input) {
@@ -43,5 +48,6 @@ export async function resolveChannel(input) {
     id: entity.id.toString(),
     title: entity.title || 'ערוץ',
     protectedContent: Boolean(entity.noforwards),
+    postId: parsed.postId || null,
   };
 }

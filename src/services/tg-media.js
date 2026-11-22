@@ -111,3 +111,20 @@ export async function downloadSmall(item) {
   const buf = await currentClient().downloadMedia(item.msg, {});
   return new Uint8Array(buf);
 }
+
+// One post (plus the rest of its album, if it is part of one).
+export async function loadPost(entity, postId) {
+  const client = currentClient();
+  const [msg] = await client.getMessages(entity, { ids: [postId] });
+  if (!msg || msg.className === 'MessageEmpty') throw new Error('לא מצאתי את הפוסט הזה. אולי הוא נמחק?');
+  let msgs = [msg];
+  if (msg.groupedId) {
+    const ids = [];
+    for (let i = postId - 10; i <= postId + 10; i++) if (i > 0) ids.push(i);
+    const around = await client.getMessages(entity, { ids });
+    msgs = around.filter((m) => m && m.groupedId && m.groupedId.equals(msg.groupedId)).sort((a, b) => a.id - b.id);
+  }
+  const items = msgs.map(messageToItem).filter(Boolean);
+  if (!items.length) throw new Error('בפוסט הזה אין קובץ להעתקה');
+  return { items, lastId: postId, single: true };
+}

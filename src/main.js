@@ -58,10 +58,10 @@ async function goChannel() {
 function goOptions() {
   show(optionsScreen, {
     onBack: goChannel,
-    onStart: async ({ folder, mode, kinds }) => {
+    onStart: async ({ folder, mode, kinds, selectedIds }) => {
       show(loading('מתחיל...'));
       const lastId = mode === 'new' ? await latestMessageId(ctx.channel.entity) : ctx.scan.lastId;
-      const t = new Transfer({ channel: ctx.channel, folder, kinds, mode, items: ctx.scan.items, lastId });
+      const t = new Transfer({ channel: ctx.channel, folder, kinds, mode, items: ctx.scan.items, lastId, selectedIds });
       ctx.transfer = t;
       show(progressScreen, { onFinish: goChannel });
       t.start().catch((e) => {

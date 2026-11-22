@@ -2,6 +2,7 @@ import { h, progressBar, setBar, fileName } from '../dom.js';
 import { formatBytes, formatDuration, percent } from '../../core/format.js';
 import { requestToken } from '../../services/google-auth.js';
 import { KINDS } from '../../services/tg-media.js';
+import { statusList } from '../components/status-list.js';
 
 const STATE_TEXT = {
   preparing: 'בודק מה כבר נמצא בדרייב...',
@@ -39,6 +40,7 @@ export function progressScreen(ctx, { onFinish }) {
   const retryBtn = h('button', { class: 'btn', hidden: true, onclick: () => t.retryFailed() }, '🔁 נסה שוב את מה שנכשל');
   const backBtn = h('button', { class: 'btn btn-primary', hidden: true, onclick: onFinish }, 'חזרה למסך הראשי');
   const log = h('ul', { class: 'log' });
+  const files = statusList(t);
 
   let lastLogTop = null;
   let scheduled = false;
@@ -95,6 +97,7 @@ export function progressScreen(ctx, { onFinish }) {
         )
       );
     }
+    files.refresh();
     document.title = t.state === 'running' && s.totalBytes ? `${percent(done, s.totalBytes).toFixed(0)}% · מטלגרם לדרייב` : 'מטלגרם לדרייב';
   };
 
@@ -139,6 +142,7 @@ export function progressScreen(ctx, { onFinish }) {
     ),
     authBox,
     curBox,
+    files,
     h('div', { class: 'card stack' }, h('h3', {}, 'יומן'), log),
     h('p', { class: 'muted small center' }, 'השאר את הדף פתוח עד הסוף. אם הוא נסגר, פתח שוב ובחר את אותה תיקייה, וההעתקה תמשיך מהמקום שנעצרה.')
   );

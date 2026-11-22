@@ -5,6 +5,7 @@ import { initGoogle, requestToken, hasToken } from '../../services/google-auth.j
 import { pickFolder } from '../../services/drive-picker.js';
 import { createFolder } from '../../services/drive-api.js';
 import { getItem, setItem } from '../../core/storage.js';
+import { filePicker } from '../components/file-picker.js';
 
 const MODES = [
   { value: 'archive', title: 'כל הארכיון', text: 'מעתיק את כל מה שכבר יש בערוץ, ומסיים.' },
@@ -27,12 +28,26 @@ export function optionsScreen(ctx, { onStart, onBack }) {
   const sum = summarize(scan.items);
   const saved = getItem(`opts.${channel.id}`, {}) || {};
   let folder = saved.folder || null;
-  let mode = saved.mode || 'archive+new';
+  const single = Boolean(scan.single); // a link to specific post(s), not a whole channel
+  let mode = single ? 'archive' : saved.mode || 'archive+new';
 
   // --- what to copy ---
   const kindBoxes = {};
+  const selected = new Set();
+  const initialKinds = single ? Object.keys(KINDS) : saved.kinds || Object.keys(KINDS).filter((k) => sum[k].count > 0 || k !== 'photo');
+  for (const it of scan.items) if (initialKinds.includes(it.kind)) selected.add(it.id);
+  const picker = filePicker(scan.items, selected);
+
   const kindRows = Object.entries(KINDS).map(([k, meta]) => {
-    const cb = h('input', { type: 'checkbox', checked: saved.kinds ? saved.kinds.includes(k) : sum[k].count > 0 || k !== 'photo' });
+    const cb = h('input', {
+      type: 'checkbox',
+      checked: initialKinds.includes(k),
+      onchange: () => {
+        // ticking a type selects/clears all files of that type in the list below
+        for (const it of scan.items) if (it.kind === k) cb.checked ? selected.add(it.id) : selected.delete(it.id);
+        picker.refresh();
+      },
+    });
     kindBoxes[k] = cb;
     return h('label', { class: 'check-row' }, cb, h('span', {}, `${meta.icon} ${meta.label}`), h('span', { class: 'muted' }, `${sum[k].count.toLocaleString()} · ${formatBytes(sum[k].bytes)}`));
   });
@@ -101,11 +116,13 @@ export function optionsScreen(ctx, { onStart, onBack }) {
   const err = h('div');
   const start = () => {
     const kinds = Object.keys(kindBoxes).filter((k) => kindBoxes[k].checked);
-    if (!kinds.length) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'בחר לפחות סוג קובץ אחד'));
+    if (mode !== 'new' && !selected.size) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'לא נבחר אף קובץ'));
+    if (mode !== 'archive' && !kinds.length) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'בחר לפחות סוג קובץ אחד לפוסטים חדשים'));
     if (!folder) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'בחר תיקייה בדרייב'));
     if (protectedBox && !protectedBox.checked) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'צריך לאשר שמותר לך לשמור את התוכן של הערוץ'));
-    setItem(`opts.${channel.id}`, { folder, mode, kinds });
-    onStart({ folder, mode, kinds });
+    if (!single) setItem(`opts.${channel.id}`, { folder, mode, kinds });
+    else setItem(`opts.${channel.id}`, { ...saved, folder });
+    onStart({ folder, mode, kinds, selectedIds: new Set(selected) });
   };
 
   return h(
@@ -113,10 +130,12 @@ export function optionsScreen(ctx, { onStart, onBack }) {
     { class: 'stack' },
     h('div', { class: 'card' },
       h('h2', {}, channel.title),
-      h('p', { class: 'muted' }, `נמצאו ${scan.items.length.toLocaleString()} קבצים · ${formatBytes(scan.items.reduce((s, i) => s + (i.size || 0), 0))}`)
+      h('p', { class: 'muted' }, single
+        ? `קישור לפוסט בודד · ${scan.items.length} ${scan.items.length === 1 ? 'קובץ' : 'קבצים'} · ${formatBytes(scan.items.reduce((s, i) => s + (i.size || 0), 0))}`
+        : `נמצאו ${scan.items.length.toLocaleString()} קבצים · ${formatBytes(scan.items.reduce((s, i) => s + (i.size || 0), 0))}`)
     ),
-    h('div', { class: 'card stack' }, h('h3', {}, 'מה להעתיק?'), ...modeRows),
-    h('div', { class: 'card stack' }, h('h3', {}, 'אילו סוגי קבצים?'), ...kindRows),
+    single ? null : h('div', { class: 'card stack' }, h('h3', {}, 'מה להעתיק?'), ...modeRows),
+    h('div', { class: 'card stack' }, h('h3', {}, 'אילו קבצים?'), single ? null : kindRows, picker),
     h('div', { class: 'card stack' }, h('h3', {}, 'איפה לשמור בדרייב?'), gBox),
     protectedBox
       ? h('div', { class: 'card stack warn' },
