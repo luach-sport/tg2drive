@@ -1,6 +1,7 @@
 // Google sign-in in the browser (Google Identity Services, token model).
-// Scope drive.file = the site can only see files it created and folders you pick for it.
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// drive.file = the site can only see files it created and folders you pick for it.
+// drive.appdata = a hidden app folder, used to link the phone and the computer.
+const SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
 
 let tokenClient = null;
 let accessToken = null;

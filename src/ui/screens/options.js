@@ -120,8 +120,9 @@ export function optionsScreen(ctx, { onStart, onBack }) {
     if (mode !== 'archive' && !kinds.length) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'בחר לפחות סוג קובץ אחד לפוסטים חדשים'));
     if (!folder) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'בחר תיקייה בדרייב'));
     if (protectedBox && !protectedBox.checked) return err.replaceChildren(h('div', { class: 'alert alert-error' }, 'צריך לאשר שמותר לך לשמור את התוכן של הערוץ'));
-    if (!single) setItem(`opts.${channel.id}`, { folder, mode, kinds });
-    else setItem(`opts.${channel.id}`, { ...saved, folder });
+    const confirmedProtected = Boolean(protectedBox?.checked || saved.confirmedProtected);
+    if (!single) setItem(`opts.${channel.id}`, { folder, mode, kinds, confirmedProtected });
+    else setItem(`opts.${channel.id}`, { ...saved, folder, confirmedProtected });
     onStart({ folder, mode, kinds, selectedIds: new Set(selected) });
   };
 

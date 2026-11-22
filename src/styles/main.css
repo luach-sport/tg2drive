@@ -202,3 +202,11 @@ select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px sol
 .bar-mini { height: 6px; margin-top: 4px; }
 .status-failed .picker-name { color: var(--bad); }
 .status-active { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+
+.ok { color: var(--ok); }
+.phone-btn { position: relative; }
+.phone-btn.on::after, .phone-btn.warn::after { content: ''; position: absolute; top: 4px; left: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+.phone-btn.warn::after { background: var(--bad); }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: flex; align-items: flex-start; justify-content: center; padding: 30px 12px; overflow-y: auto; z-index: 50; }
+.modal { width: 100%; max-width: 460px; }
+.conn { text-align: center; font-size: 0.95rem; }
