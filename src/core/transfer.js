@@ -31,7 +31,8 @@ export class Transfer {
     this.current = null; // { item, sent, size }
     this.failedItems = [];
     this.files = []; // every file this run deals with, in order
-    this.status = new Map(); // id -> 'waiting' | 'active' | 'done' | 'exists' | 'failed'
+    this.status = new Map(); // id -> 'waiting' | 'active' | 'done' | 'exists' | 'failed' | 'held' | 'cancelled'
+    this._abort = null; // { id, reason } — stop the file that is being copied right now
     this._initialItems = items || [];
     this._gate = null;
     this._authWaiter = null;
@@ -110,6 +111,16 @@ export class Transfer {
         this.current = null;
         return;
       } catch (e) {
+        if (e.itemAborted) {
+          // the user paused or cancelled this one file — the rest continue
+          const reason = e.itemAborted;
+          this._abort = null;
+          this.current = null;
+          this.status.set(item.id, reason);
+          this._removeFromTotals(item);
+          this._addLog(item, 'retry', reason === 'held' ? 'הושהה (אפשר להמשיך מאותה נקודה)' : 'בוטל');
+          return;
+        }
         if (this.state === 'stopped') {
           this.status.set(item.id, 'waiting');
           return;
@@ -129,7 +140,7 @@ export class Transfer {
           return;
         }
         this._addLog(item, 'retry', `ניסיון ${attempt} נכשל: ${e.message}. מנסה שוב...`);
-        await sleep(Math.min(60000, 3000 * 2 ** (attempt - 1)));
+        await this._sleepAbortable(Math.min(60000, 3000 * 2 ** (attempt - 1)), item);
       }
     }
   }
@@ -185,7 +196,8 @@ export class Transfer {
 
     const onDownloaded = (n) => this._downloaded(n);
     for await (const part of this.d.streamDocument(this.channel.entity, item, { onDownloaded, startOffset: offset })) {
-      await this._checkPause();
+      await this._checkPause(item);
+      this._checkAbort(item);
       if (this.state === 'stopped') throw new Error('stopped');
       pending.push(part);
       pendingLen += part.length;
@@ -309,8 +321,83 @@ export class Transfer {
     if (restart) this._loop();
   }
 
-  async _checkPause() {
-    if (this._gate) await this._gate.promise;
+  async _checkPause(item) {
+    while (this._gate) {
+      if (item && this._abort?.id === item.id) return;
+      await Promise.race([this._gate.promise, sleep(500)]);
+    }
+  }
+
+  _checkAbort(item) {
+    if (this._abort && this._abort.id === item.id) throw Object.assign(new Error('aborted'), { itemAborted: this._abort.reason });
+  }
+
+  async _sleepAbortable(ms, item) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      this._checkAbort(item);
+      await sleep(Math.min(500, end - Date.now()));
+    }
+    this._checkAbort(item);
+  }
+
+  _removeFromTotals(item) {
+    this.stats.totalFiles--;
+    this.stats.totalBytes -= item.size || 0;
+  }
+
+  // --- controls for a single file (from the computer or from the phone) ---
+  holdItem(id) {
+    this._stopItem(id, 'held');
+  }
+
+  cancelItem(id) {
+    this._stopItem(id, 'cancelled');
+  }
+
+  _stopItem(id, reason) {
+    const st = this.status.get(id);
+    if (st === 'active') {
+      this._abort = { id, reason };
+    } else if (st === 'waiting') {
+      const i = this.queue.findIndex((x) => x.id === id);
+      if (i >= 0) {
+        const [item] = this.queue.splice(i, 1);
+        this._removeFromTotals(item);
+      }
+      this.status.set(id, reason);
+    } else if (st === 'held' && reason === 'cancelled') {
+      this.status.set(id, 'cancelled');
+    }
+    this._emit();
+  }
+
+  // continue a paused/cancelled/failed file — it goes next in line
+  resumeItem(id) {
+    const st = this.status.get(id);
+    if (!['held', 'cancelled', 'failed'].includes(st)) return;
+    const item = this.files.find((f) => f.id === id);
+    if (!item) return;
+    if (st === 'failed') {
+      this.stats.failed--;
+      this.failedItems = this.failedItems.filter((f) => f.id !== id);
+    }
+    item.error = '';
+    this.status.set(id, 'waiting');
+    this.queue.unshift(item);
+    if (st !== 'failed') {
+      // paused/cancelled files were taken out of the totals; failed ones never were
+      this.stats.totalFiles++;
+      this.stats.totalBytes += item.size || 0;
+    }
+    if (this.state === 'done') this._loop();
+    this._emit();
+  }
+
+  itemAction(id, action) {
+    if (action === 'hold') this.holdItem(id);
+    else if (action === 'cancel') this.cancelItem(id);
+    else if (action === 'resume' || action === 'retry') this.resumeItem(id);
   }
 
   async _waitForAuth() {

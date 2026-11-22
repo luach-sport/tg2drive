@@ -210,3 +210,9 @@ select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px sol
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: flex; align-items: flex-start; justify-content: center; padding: 30px 12px; overflow-y: auto; z-index: 50; }
 .modal { width: 100%; max-width: 460px; }
 .conn { text-align: center; font-size: 0.95rem; }
+
+.row-actions { display: flex; gap: 4px; flex: none; }
+.mini-btn { font: inherit; font-size: 0.95rem; line-height: 1; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+.mini-btn:hover:not(:disabled) { border-color: var(--primary); }
+.mini-btn:disabled { opacity: 0.4; }
+.status-held .picker-name, .status-cancelled .picker-name { opacity: 0.6; }

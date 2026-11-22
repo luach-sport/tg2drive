@@ -1,7 +1,9 @@
 import { h, progressBar, setBar, fileName } from '../dom.js';
 import { formatBytes, formatDuration, percent } from '../../core/format.js';
 import { initGoogle, requestToken, hasToken } from '../../services/google-auth.js';
-import { readJson, writeJson, STATUS_FILE, COMMANDS_FILE } from '../../services/drive-appdata.js';
+import { readJson, writeJson, STATUS_FILE, COMMANDS_FILE, SCAN_FILE } from '../../services/drive-appdata.js';
+import { filePicker } from '../components/file-picker.js';
+import { KINDS } from '../../services/tg-media.js';
 import { statusList } from '../components/status-list.js';
 import { sleep } from '../../core/bytes.js';
 
@@ -25,14 +27,19 @@ export function remoteViewScreen(ctx, { onLeave }) {
   // --- send a link ---
   const linkInput = h('input', { type: 'url', dir: 'ltr', class: 'big-input', placeholder: 'https://t.me/...' });
   const sendMsg = h('div', { class: 'small' });
+  const pickArea = h('div', { class: 'stack' });
   const sendForm = h(
     'form',
     { class: 'card stack', onsubmit: (e) => (e.preventDefault(), sendLink()) },
     h('h3', {}, '➕ שלח קישור למחשב'),
-    h('p', { class: 'muted small' }, 'ערוץ שלם או פוסט בודד. המחשב יתחיל להעתיק אותו (או יחכה שההעתקה הנוכחית תסתיים).'),
+    h('p', { class: 'muted small' }, 'ערוץ שלם או פוסט בודד. אפשר להעתיק הכול, או קודם לראות את רשימת הקבצים ולבחור.'),
     linkInput,
-    h('button', { class: 'btn btn-primary btn-wide', type: 'submit' }, '📤 שלח למחשב'),
-    sendMsg
+    h('div', { class: 'row' },
+      h('button', { class: 'btn btn-primary grow', type: 'submit' }, '📤 העתק הכול'),
+      h('button', { class: 'btn grow', type: 'button', onclick: () => requestScan() }, '📋 בחר קבצים')
+    ),
+    sendMsg,
+    pickArea
   );
 
   // --- live status ---
@@ -53,26 +60,34 @@ export function remoteViewScreen(ctx, { onLeave }) {
 
   // statusList expects a transfer-like object; we fill it from each snapshot
   const mirror = { files: [], status: new Map(), current: null };
-  const files = statusList(mirror);
+  const files = statusList(mirror, {
+    onAction: (fileId, action) =>
+      command('item', { fileId, action }).catch((e) => e.authNeeded && showSignIn()),
+  });
 
   main.append(statusCard, sendForm, files, h('div', { class: 'card stack' }, h('h3', {}, 'יומן'), log));
 
   let alive = true;
   let snap = null;
 
-  const command = async (type, extra = {}) => {
-    const data = (await readJson(COMMANDS_FILE).catch(() => null)) || { cmds: [] };
-    const cmds = (data.cmds || []).filter((c) => Date.now() - c.ts < 24 * 3600 * 1000).slice(-30);
-    cmds.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now(), type, ...extra });
-    await writeJson(COMMANDS_FILE, { cmds });
+  // commands are written one after another, so two quick taps never overwrite each other
+  let chain = Promise.resolve();
+  const command = (type, extra = {}) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const job = chain.then(async () => {
+      const data = (await readJson(COMMANDS_FILE).catch(() => null)) || { cmds: [] };
+      const cmds = (data.cmds || []).filter((c) => Date.now() - c.ts < 24 * 3600 * 1000).slice(-30);
+      cmds.push({ id, ts: Date.now(), type, ...extra });
+      await writeJson(COMMANDS_FILE, { cmds });
+      return id;
+    });
+    chain = job.catch(() => {});
+    return job;
   };
 
   const sendLink = async () => {
-    const link = linkInput.value.trim();
-    if (!/t\.me\/|^@/.test(link)) {
-      sendMsg.replaceChildren(h('span', { class: 'bad' }, 'זה לא נראה כמו קישור טלגרם'));
-      return;
-    }
+    const link = validLink();
+    if (!link) return;
     sendMsg.replaceChildren('שולח...');
     try {
       await command('link', { link });
@@ -82,6 +97,66 @@ export function remoteViewScreen(ctx, { onLeave }) {
       sendMsg.replaceChildren(h('span', { class: 'bad' }, e.authNeeded ? 'צריך להתחבר שוב לגוגל (למעלה)' : e.message));
       if (e.authNeeded) showSignIn();
     }
+  };
+
+  const validLink = () => {
+    const link = linkInput.value.trim();
+    if (!/t\.me\/|^@/.test(link)) {
+      sendMsg.replaceChildren(h('span', { class: 'bad' }, 'זה לא נראה כמו קישור טלגרם'));
+      return null;
+    }
+    return link;
+  };
+
+  // ask the computer to read the channel, then show its files here to choose from
+  const requestScan = async () => {
+    const link = validLink();
+    if (!link) return;
+    pickArea.replaceChildren();
+    sendMsg.replaceChildren('שולח למחשב בקשה לסרוק את הערוץ...');
+    try {
+      const id = await command('scan', { link });
+      sendMsg.replaceChildren(h('span', {}, '⏳ המחשב סורק את הערוץ. בערוץ גדול זה יכול לקחת כמה דקות — ההתקדמות מופיעה למעלה.'));
+      for (let i = 0; i < 400 && alive; i++) {
+        await sleep(3000);
+        const res = await readJson(SCAN_FILE).catch(() => null);
+        if (res?.req !== id) continue;
+        if (res.error) return sendMsg.replaceChildren(h('span', { class: 'bad' }, `שגיאה: ${res.error}`));
+        return showPicker(res);
+      }
+      sendMsg.replaceChildren(h('span', { class: 'bad' }, 'המחשב לא ענה. ודא שהאתר פתוח במחשב.'));
+    } catch (e) {
+      sendMsg.replaceChildren(h('span', { class: 'bad' }, e.authNeeded ? 'צריך להתחבר שוב לגוגל' : e.message));
+      if (e.authNeeded) showSignIn();
+    }
+  };
+
+  const showPicker = (res) => {
+    sendMsg.replaceChildren();
+    const items = res.items.map(([id, name, size, kind, date, caption]) => ({ id, name, size, kind, date, caption: caption || '' }));
+    const selected = new Set(items.map((i) => i.id));
+    const picker = filePicker(items, selected);
+    picker.open = true;
+    const go = h('button', { class: 'btn btn-primary btn-wide', type: 'button', onclick: async () => {
+      if (!selected.size) return alert('לא נבחר אף קובץ');
+      go.disabled = true;
+      try {
+        await command('start', { link: res.link, ids: [...selected] });
+        pickArea.replaceChildren();
+        linkInput.value = '';
+        sendMsg.replaceChildren(h('span', { class: 'ok' }, `✅ נשלחו ${selected.size} קבצים מתוך "${res.title}". המחשב יתחיל בקרוב.`));
+      } catch (e) {
+        go.disabled = false;
+        sendMsg.replaceChildren(h('span', { class: 'bad' }, e.message));
+      }
+    } }, '📤 שלח את הנבחרים למחשב');
+    pickArea.replaceChildren(
+      h('b', {}, `${res.title} · ${items.length} קבצים`),
+      h('div', { class: 'muted small' }, Object.entries(KINDS).map(([k, m]) => { const n = items.filter((i) => i.kind === k).length; return n ? `${m.icon} ${n}  ` : ''; }).join('')),
+      picker,
+      go,
+      h('button', { class: 'btn btn-wide', type: 'button', onclick: () => pickArea.replaceChildren() }, 'ביטול')
+    );
   };
 
   const btn = (label, type, cls = '') =>

@@ -69,3 +69,4 @@ export async function writeJson(name, obj) {
 
 export const STATUS_FILE = 'tg2drive-status.json';
 export const COMMANDS_FILE = 'tg2drive-commands.json';
+export const SCAN_FILE = 'tg2drive-scan.json';

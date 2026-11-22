@@ -39,7 +39,7 @@ export class RemoteHost {
       try {
         if (!this.authNeeded) {
           await this._publish();
-          if (tick % 2 === 0) await this._readCommands();
+          await this._readCommands();
           this.lastOk = Date.now();
         }
       } catch (e) {

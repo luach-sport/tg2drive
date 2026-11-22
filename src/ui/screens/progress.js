@@ -40,7 +40,7 @@ export function progressScreen(ctx, { onFinish }) {
   const retryBtn = h('button', { class: 'btn', hidden: true, onclick: () => t.retryFailed() }, '🔁 נסה שוב את מה שנכשל');
   const backBtn = h('button', { class: 'btn btn-primary', hidden: true, onclick: onFinish }, 'חזרה למסך הראשי');
   const log = h('ul', { class: 'log' });
-  const files = statusList(t);
+  const files = statusList(t, { onAction: (id, a) => t.itemAction(id, a) });
 
   let lastLogTop = null;
   let scheduled = false;

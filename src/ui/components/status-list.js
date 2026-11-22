@@ -7,11 +7,22 @@ const STATES = {
   done: { icon: '✅', label: 'הועתקו' },
   exists: { icon: '⏭', label: 'כבר היו בדרייב' },
   failed: { icon: '❌', label: 'נכשלו' },
+  held: { icon: '⏸', label: 'מושהים' },
+  cancelled: { icon: '🚫', label: 'בוטלו' },
+};
+
+// buttons per state: [action, icon, tooltip]
+const ACTIONS = {
+  waiting: [['hold', '⏸', 'השהה את השיעור הזה'], ['cancel', '✖', 'בטל את השיעור הזה']],
+  active: [['hold', '⏸', 'השהה את השיעור הזה'], ['cancel', '✖', 'בטל את השיעור הזה']],
+  held: [['resume', '▶️', 'המשך מאותה נקודה'], ['cancel', '✖', 'בטל']],
+  cancelled: [['resume', '↩️', 'החזר לתור']],
+  failed: [['retry', '🔁', 'נסה שוב']],
 };
 const PAGE = 300;
 
 /** Openable list with the state of every file in the run. Call .refresh() to redraw. */
-export function statusList(transfer) {
+export function statusList(transfer, { onAction } = {}) {
   let filter = 'all';
   let shown = PAGE;
   let lastDraw = 0;
@@ -42,7 +53,18 @@ export function statusList(transfer) {
           st === 'failed' && it.error ? h('div', { class: 'small bad' }, it.error) : null
         ),
         h('span', { class: 'muted small nowrap' }, cur ? `${percent(cur.sent, cur.size).toFixed(0)}% · ` : '', formatBytes(it.size)),
-        it.driveFile?.webViewLink ? h('a', { href: it.driveFile.webViewLink, target: '_blank', rel: 'noopener', class: 'small' }, 'פתח') : null
+        it.driveFile?.webViewLink ? h('a', { href: it.driveFile.webViewLink, target: '_blank', rel: 'noopener', class: 'small' }, 'פתח') : null,
+        onAction
+          ? h('span', { class: 'row-actions' },
+              ...(ACTIONS[st] || []).map(([a, icon, tip]) =>
+                h('button', { type: 'button', class: 'mini-btn', title: tip, 'aria-label': tip, onclick: (e) => {
+                  e.preventDefault();
+                  e.target.disabled = true;
+                  onAction(it.id, a);
+                  setTimeout(() => draw(true), 300);
+                } }, icon)
+              ))
+          : null
       )
     );
   };
