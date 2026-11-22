@@ -179,3 +179,7 @@ input:focus { outline: 2px solid var(--primary); outline-offset: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 [hidden] { display: none !important; }
+
+.qr-box { display: flex; justify-content: center; min-height: 240px; align-items: center; }
+.qr-box canvas { border-radius: 12px; background: #fff; }
+.qr-steps { text-align: start; margin: 0 auto; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 4px; }

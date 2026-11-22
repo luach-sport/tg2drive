@@ -2,6 +2,8 @@ import { Api } from 'telegram';
 import { h } from '../dom.js';
 import { sendCode, resendCode, signIn, signInPassword, passwordHint, describeSentCode } from '../../services/tg-login.js';
 import { getItem, setItem } from '../../core/storage.js';
+import { qrLogin } from '../../services/tg-qr.js';
+import QRCode from 'qrcode';
 
 const ERRORS = {
   PHONE_NUMBER_INVALID: 'מספר הטלפון לא תקין. כתוב אותו עם קידומת, למשל ‎+972501234567',
@@ -71,6 +73,47 @@ export function loginScreen(ctx, onDone) {
       },
     },
     title, hint, input, btn, extra, msg
+  );
+
+  // --- QR login (default) ---
+  let qrSession = null;
+  const qrBox = h('div', { class: 'qr-box' });
+  const showQr = () => {
+    form.hidden = true;
+    qrCard.hidden = false;
+    qrBox.replaceChildren(h('div', { class: 'spinner' }));
+    qrMsg.replaceChildren();
+    qrSession?.cancel();
+    qrSession = qrLogin(ctx.settings, async (url) => {
+      const canvas = h('canvas');
+      await QRCode.toCanvas(canvas, url, { width: 240, margin: 2 });
+      qrBox.replaceChildren(canvas);
+    });
+    qrSession.promise
+      .then((r) => {
+        if (r === 'ok') return finish();
+        if (r === 'password') {
+          qrCard.hidden = true;
+          form.hidden = false;
+          return askPassword();
+        }
+      })
+      .catch((e) => qrMsg.replaceChildren(h('div', { class: 'alert alert-error' }, explain(e)), h('button', { class: 'btn', type: 'button', onclick: showQr }, 'נסה שוב')));
+  };
+  const qrMsg = h('div');
+  const qrCard = h(
+    'div',
+    { class: 'card stack center' },
+    h('h2', {}, 'התחברות לטלגרם בסריקת QR'),
+    qrBox,
+    h('ol', { class: 'qr-steps' },
+      h('li', {}, 'פתח את טלגרם בטלפון'),
+      h('li', {}, 'הגדרות ← מכשירים ← ', h('b', {}, 'קישור מכשיר שולחן עבודה'), ' (Link Desktop Device)'),
+      h('li', {}, 'כוון את המצלמה לקוד שלמעלה')
+    ),
+    h('p', { class: 'muted small' }, 'הקוד מתחלף לבד כל חצי דקה בערך.'),
+    qrMsg,
+    h('a', { href: '#', onclick: (e) => { e.preventDefault(); qrSession?.cancel(); qrCard.hidden = true; form.hidden = false; askPhone(); } }, 'או התחבר עם מספר טלפון וקוד')
   );
 
   // --- step 1: phone ---
@@ -147,18 +190,20 @@ export function loginScreen(ctx, onDone) {
   };
 
   const finish = async () => {
-    title.textContent = 'מחובר ✅';
+    qrSession?.cancel();
     onDone();
   };
 
-  askPhone();
-
-  return h(
+  const node = h(
     'section',
     { class: 'stack' },
+    qrCard,
     form,
     h('p', { class: 'muted small' }, 'ההתחברות נשמרת בדפדפן הזה בלבד. אל תשתמש באתר במחשב של מישהו אחר.')
   );
+  node.cleanup = () => qrSession?.cancel();
+  showQr();
+  return node;
 }
 
 // "050-1234567" → "+972501234567"
